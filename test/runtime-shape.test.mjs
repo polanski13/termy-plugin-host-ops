@@ -11,3 +11,11 @@ test("built plugin keeps Termy loader import", () => {
 test("built plugin keeps direct default plugin export", () => {
   assert.match(output, /export\s+default\s+definePlugin\s*\(/);
 });
+
+test("built plugin uses SDK 0.2 APIs", () => {
+  assert.match(output, /ctx\.registerSettings\(/);
+  assert.match(output, /ctx\.workspace\.current\(/);
+  assert.match(output, /ctx\.storage\.set\(/);
+  assert.match(output, /ctx\.ui\.statGrid\(/);
+  assert.match(output, /ctx\.ui\.list\(/);
+});

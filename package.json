@@ -1,6 +1,6 @@
 {
   "name": "termy-plugin-host-ops",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Showcase community plugin for Termy host operations.",
   "license": "MIT",
@@ -16,7 +16,7 @@
     "pack:plugin": "npm run typecheck && npm test && node scripts/pack-plugin.mjs"
   },
   "devDependencies": {
-    "@apolanski13/termy-sdk": "0.1.0",
+    "@apolanski13/termy-sdk": "0.2.0",
     "ajv": "^8.17.1",
     "typescript": "^5.9.3"
   },

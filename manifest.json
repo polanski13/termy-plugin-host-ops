@@ -1,13 +1,16 @@
 {
   "id": "community.termy.host-ops",
   "name": "Host Ops Cockpit",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "termyApiVersion": "1",
   "entry": "dist/index.js",
   "capabilities": [
     "hosts.read",
     "snippets.read",
-    "terminal.write"
+    "terminal.write",
+    "workspace.read",
+    "storage.read",
+    "storage.write"
   ],
   "contributes": {
     "actions": [
@@ -15,6 +18,11 @@
         "id": "ops.openDashboard",
         "title": "Host Ops: Open Cockpit",
         "icon": "rectangle.grid.2x2.fill"
+      },
+      {
+        "id": "ops.refreshDashboard",
+        "title": "Host Ops: Refresh Dashboard",
+        "icon": "arrow.clockwise"
       },
       {
         "id": "ops.showInventory",
@@ -42,6 +50,13 @@
         "id": "ops.dashboard",
         "title": "Host Ops Cockpit",
         "icon": "server.rack"
+      }
+    ],
+    "settings": [
+      {
+        "id": "ops.preferences",
+        "title": "Host Ops Preferences",
+        "icon": "slider.horizontal.3"
       }
     ]
   }

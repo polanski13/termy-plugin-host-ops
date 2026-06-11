@@ -35,3 +35,16 @@ test("schema rejects missing contribution fields", () => {
     false
   );
 });
+
+test("schema rejects invalid settings contributions", () => {
+  assert.equal(
+    validate({
+      ...manifest,
+      contributes: {
+        ...manifest.contributes,
+        settings: [{ id: "bad id", title: "Bad" }]
+      }
+    }),
+    false
+  );
+});

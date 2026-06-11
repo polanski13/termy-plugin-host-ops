@@ -1,42 +1,78 @@
 import { definePlugin } from "@apolanski13/termy-sdk";
 const paneDashboard = "ops.dashboard";
+const settingsPreferences = "ops.preferences";
 const actionOpenDashboard = "ops.openDashboard";
+const actionRefreshDashboard = "ops.refreshDashboard";
 const actionShowInventory = "ops.showInventory";
 const actionInsertHealthCheck = "ops.insertHealthCheck";
 const actionRunHealthCheck = "ops.runHealthCheck";
 const actionShowRunbook = "ops.showRunbook";
-const healthCheckCommand = "hostname; whoami; uptime; df -h; date";
+const defaultHealthCheckCommand = "hostname; whoami; uptime; df -h; date";
+const storagePreferencesKey = "preferences";
+const storageRefreshCountKey = "dashboardRefreshCount";
+const storageLastInventoryKey = "lastInventory";
+const defaultPreferences = {
+    title: "Host Ops Cockpit",
+    healthCommand: defaultHealthCheckCommand,
+    includeSnippets: true,
+    inventoryMode: "compact"
+};
 const dashboardActions = [
+    { id: actionRefreshDashboard, title: "Refresh", icon: "arrow.clockwise", refreshPane: true },
     { id: actionShowInventory, title: "Inventory", icon: "list.bullet.rectangle.fill" },
     { id: actionInsertHealthCheck, title: "Insert check", icon: "terminal.fill" },
-    { id: actionRunHealthCheck, title: "Run check", icon: "play.fill" },
+    { id: actionRunHealthCheck, title: "Run check", icon: "play.fill", style: "prominent" },
     { id: actionShowRunbook, title: "Runbook", icon: "book.closed.fill" }
 ];
 export default definePlugin({
     async activate(ctx) {
-        ctx.registerPane(paneDashboard, async () => {
-            const { hosts, snippets } = await readInventory(ctx);
-            return dashboardView(ctx, hosts, snippets);
+        ctx.registerPane(paneDashboard, async (event) => {
+            const [inventory, workspace, preferences, refreshCount] = await Promise.all([
+                readInventory(ctx),
+                ctx.workspace.current(),
+                readPreferences(ctx),
+                incrementRefreshCount(ctx)
+            ]);
+            await ctx.storage.set(storageLastInventoryKey, {
+                hosts: inventory.hosts.length,
+                snippets: inventory.snippets.length,
+                refreshedAt: new Date().toISOString(),
+                reason: event?.refreshReason ?? "initial"
+            });
+            return dashboardView(ctx, inventory, workspace, preferences, refreshCount, event?.refreshReason ?? "initial");
+        });
+        ctx.registerSettings(settingsPreferences, async (event) => {
+            if (event?.formValues) {
+                await savePreferences(ctx, event.formValues);
+                ctx.effects.toast("Host Ops preferences saved", "success");
+            }
+            return settingsView(ctx, await readPreferences(ctx));
         });
         ctx.registerAction(actionOpenDashboard, () => {
             ctx.effects.toast("Opening Host Ops Cockpit", "info");
             ctx.effects.openPane(paneDashboard);
         });
-        ctx.registerAction(actionShowInventory, async () => {
-            const { hosts, snippets } = await readInventory(ctx);
-            ctx.effects.toast(`Inventory loaded: ${hosts.length} hosts, ${snippets.length} snippets`, "success");
-            return inventoryView(ctx, hosts, snippets);
+        ctx.registerAction(actionRefreshDashboard, () => {
+            ctx.effects.toast("Refreshing Host Ops Cockpit", "info");
         });
-        ctx.registerAction(actionInsertHealthCheck, () => {
+        ctx.registerAction(actionShowInventory, async (event) => {
+            const [inventory, preferences] = await Promise.all([readInventory(ctx), readPreferences(ctx)]);
+            ctx.effects.toast(inventoryToast(event, inventory), "success");
+            return inventoryView(ctx, inventory, preferences, event);
+        });
+        ctx.registerAction(actionInsertHealthCheck, async () => {
+            const preferences = await readPreferences(ctx);
             ctx.effects.toast("Health check inserted into the focused terminal", "info");
-            return ctx.terminal.insert(healthCheckCommand);
+            return ctx.terminal.insert(preferences.healthCommand);
         });
-        ctx.registerAction(actionRunHealthCheck, () => {
+        ctx.registerAction(actionRunHealthCheck, async () => {
+            const preferences = await readPreferences(ctx);
             ctx.effects.toast("Health check sent to the focused terminal", "warning");
-            return ctx.terminal.run(healthCheckCommand);
+            return ctx.terminal.run(preferences.healthCommand);
         });
-        ctx.registerAction(actionShowRunbook, () => {
-            return runbookView(ctx);
+        ctx.registerAction(actionShowRunbook, async () => {
+            const [workspace, preferences] = await Promise.all([ctx.workspace.current(), readPreferences(ctx)]);
+            return runbookView(ctx, workspace, preferences);
         });
     }
 });
@@ -44,35 +80,78 @@ async function readInventory(ctx) {
     const [hosts, snippets] = await Promise.all([ctx.hosts.list(), ctx.snippets.list()]);
     return { hosts, snippets };
 }
-function dashboardView(ctx, hosts, snippets) {
+async function readPreferences(ctx) {
+    const stored = await ctx.storage.get(storagePreferencesKey);
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+        return defaultPreferences;
+    }
+    return {
+        title: stringValue(stored.title, defaultPreferences.title),
+        healthCommand: stringValue(stored.healthCommand, defaultPreferences.healthCommand),
+        includeSnippets: booleanValue(stored.includeSnippets, defaultPreferences.includeSnippets),
+        inventoryMode: stringValue(stored.inventoryMode, defaultPreferences.inventoryMode)
+    };
+}
+async function savePreferences(ctx, values) {
+    await ctx.storage.set(storagePreferencesKey, {
+        title: stringValue(values.title, defaultPreferences.title),
+        healthCommand: stringValue(values.healthCommand, defaultPreferences.healthCommand),
+        includeSnippets: booleanValue(values.includeSnippets, defaultPreferences.includeSnippets),
+        inventoryMode: stringValue(values.inventoryMode, defaultPreferences.inventoryMode)
+    });
+}
+async function incrementRefreshCount(ctx) {
+    const current = Number((await ctx.storage.get(storageRefreshCountKey)) ?? 0);
+    const next = current + 1;
+    await ctx.storage.set(storageRefreshCountKey, next);
+    return next;
+}
+function dashboardView(ctx, inventory, workspace, preferences, refreshCount, refreshReason) {
     const sections = [
         ctx.ui.markdown({
-            title: "Host Ops Cockpit",
+            title: preferences.title,
             body: [
-                `Loaded ${hosts.length} hosts and ${snippets.length} snippets from Termy.`,
-                "This pane is rendered from schema returned by a TypeScript plugin.",
-                "Use the actions below to open inventory, inspect the runbook, or send a safe command to the focused terminal."
+                `Loaded ${inventory.hosts.length} hosts and ${inventory.snippets.length} snippets through capability-gated SDK calls.`,
+                `Focused pane: ${workspace.focusedPaneKind ?? "none"}. Terminal write available: ${workspace.focusedPaneHasTerminal ? "yes" : "no"}.`,
+                `Refreshes stored by this plugin: ${refreshCount}. Last reason: ${refreshReason}.`
             ].join("\n")
         }),
-        metricsTable(ctx, hosts, snippets),
-        hostsTable(ctx, hosts),
-        snippetsTable(ctx, snippets),
-        runbookForm(ctx)
+        ctx.ui.statGrid({
+            stats: [
+                { id: "hosts", title: "Hosts", value: inventory.hosts.length, tone: "accent" },
+                { id: "snippets", title: "Snippets", value: inventory.snippets.length },
+                { id: "refreshes", title: "Refreshes", value: refreshCount },
+                { id: "terminal", title: "Focused terminal", value: workspace.focusedPaneHasTerminal ? "ready" : "not focused", tone: workspace.focusedPaneHasTerminal ? "success" : "warning" }
+            ]
+        }),
+        workspaceList(ctx, workspace),
+        ctx.ui.divider("Inventory"),
+        hostsTable(ctx, inventory.hosts),
+        preferences.includeSnippets ? snippetsTable(ctx, inventory.snippets) : ctx.ui.empty("Snippets hidden", "Enable snippets in plugin settings."),
+        commandForm(ctx, preferences)
     ];
     return {
-        ...ctx.ui.stack(sections, "Host Ops Cockpit"),
+        ...ctx.ui.stack(sections, preferences.title),
         actions: dashboardActions
     };
 }
-function inventoryView(ctx, hosts, snippets) {
+function inventoryView(ctx, inventory, preferences, event) {
+    const rowLabel = event?.row?.title ? ` Row: ${event.row.title}.` : "";
     return {
         ...ctx.ui.stack([
             ctx.ui.markdown({
                 title: "Inventory",
-                body: `Termy exposed ${hosts.length} hosts and ${snippets.length} snippets through capability-gated SDK calls.`
+                body: `Termy exposed ${inventory.hosts.length} hosts and ${inventory.snippets.length} snippets.${rowLabel}`
             }),
-            hostsTable(ctx, hosts),
-            snippetsTable(ctx, snippets)
+            ctx.ui.statGrid({
+                stats: [
+                    { id: "hosts", title: "Hosts", value: inventory.hosts.length, tone: "accent" },
+                    { id: "snippets", title: "Snippets", value: inventory.snippets.length }
+                ]
+            }),
+            hostsList(ctx, inventory.hosts, preferences),
+            hostsTable(ctx, inventory.hosts),
+            preferences.includeSnippets ? snippetsTable(ctx, inventory.snippets) : ctx.ui.empty("Snippets hidden", "Enable snippets in plugin settings.")
         ], "Host Ops Inventory"),
         actions: [
             { id: actionOpenDashboard, title: "Open cockpit", icon: "rectangle.grid.2x2.fill" },
@@ -80,40 +159,87 @@ function inventoryView(ctx, hosts, snippets) {
         ]
     };
 }
-function runbookView(ctx) {
+function runbookView(ctx, workspace, preferences) {
     return {
         ...ctx.ui.stack([
             ctx.ui.markdown({
                 title: "Safe terminal runbook",
                 body: [
                     "This plugin never receives terminal scrollback, SSH credentials, Keychain data, filesystem access, or network access.",
-                    "The only terminal effect in this plugin is a user-triggered write to the focused terminal.",
-                    "Termy still prompts before running text through the terminal.write capability."
+                    "The only terminal effect is a user-triggered write to the focused terminal.",
+                    "Termy prompts before running text through the terminal.write capability."
                 ].join("\n")
             }),
-            runbookForm(ctx)
+            workspaceList(ctx, workspace),
+            commandForm(ctx, preferences)
         ], "Host Ops Runbook"),
         actions: [
             { id: actionInsertHealthCheck, title: "Insert check", icon: "terminal.fill" },
-            { id: actionRunHealthCheck, title: "Run check", icon: "play.fill" },
+            { id: actionRunHealthCheck, title: "Run check", icon: "play.fill", style: "prominent" },
             { id: actionOpenDashboard, title: "Open cockpit", icon: "rectangle.grid.2x2.fill" }
         ]
     };
 }
-function metricsTable(ctx, hosts, snippets) {
-    return ctx.ui.table({
-        title: "SDK surface used",
-        columns: [
-            { id: "feature", title: "Feature" },
-            { id: "value", title: "Value" }
+function settingsView(ctx, preferences) {
+    return ctx.ui.form({
+        id: "ops.preferences.form",
+        title: "Host Ops Preferences",
+        fields: [
+            { id: "title", title: "Dashboard title", type: "text", value: preferences.title },
+            { id: "healthCommand", title: "Health check command", type: "textarea", value: preferences.healthCommand },
+            { id: "includeSnippets", title: "Show snippets", type: "checkbox", value: preferences.includeSnippets },
+            {
+                id: "inventoryMode",
+                title: "Inventory density",
+                type: "select",
+                value: preferences.inventoryMode,
+                options: [
+                    { value: "compact", title: "Compact" },
+                    { value: "expanded", title: "Expanded" }
+                ]
+            }
         ],
-        rows: [
-            { feature: "hosts.read", value: hosts.length },
-            { feature: "snippets.read", value: snippets.length },
-            { feature: "terminal.write", value: "insert and run actions" },
-            { feature: "schema UI", value: "markdown, table, form, stack, empty" },
-            { feature: "effects", value: "toast and openPane" }
+        actions: [
+            { id: "ops.preferences.save", title: "Save", submitFormId: "ops.preferences.form", style: "prominent" }
         ]
+    });
+}
+function workspaceList(ctx, workspace) {
+    const host = workspace.focusedHost;
+    return ctx.ui.list({
+        title: "Workspace context",
+        items: [
+            {
+                id: "focused-pane",
+                title: workspace.focusedPaneKind ?? "No focused pane",
+                subtitle: workspace.focusedPaneHasTerminal ? "Terminal input is available" : "Terminal input is not available",
+                icon: workspace.focusedPaneHasTerminal ? "terminal.fill" : "rectangle.dashed"
+            },
+            {
+                id: "focused-host",
+                title: host?.name ?? "No focused host",
+                subtitle: host ? `${host.username}@${host.hostname}:${host.port}` : "Focus a host-backed pane to expose a safe host summary",
+                detail: host?.osKind ?? "unknown",
+                icon: "server.rack"
+            }
+        ]
+    });
+}
+function hostsList(ctx, hosts, preferences) {
+    if (hosts.length === 0) {
+        return ctx.ui.empty("No hosts", "Create a host in Termy, then reload this pane.");
+    }
+    return ctx.ui.list({
+        title: "Host rows",
+        items: hosts.map((host) => ({
+            id: host.id,
+            title: host.name,
+            subtitle: `${host.username}@${host.hostname}:${host.port}`,
+            detail: preferences.inventoryMode === "expanded" ? host.osKind || "unknown" : undefined,
+            icon: "server.rack",
+            value: host.id,
+            actions: [{ id: actionShowInventory, title: "Inspect", icon: "magnifyingglass", rowAction: true }]
+        }))
     });
 }
 function hostsTable(ctx, hosts) {
@@ -135,7 +261,8 @@ function hostsTable(ctx, hosts) {
             user: host.username,
             port: host.port,
             os: host.osKind || "unknown"
-        }))
+        })),
+        actions: [{ id: actionShowInventory, title: "Inventory", rowAction: true, icon: "magnifyingglass" }]
     });
 }
 function snippetsTable(ctx, snippets) {
@@ -156,29 +283,39 @@ function snippetsTable(ctx, snippets) {
         }))
     });
 }
-function runbookForm(ctx) {
+function commandForm(ctx, preferences) {
     return ctx.ui.form({
+        id: "ops.command.preview",
         title: "Focused terminal command",
         fields: [
             {
                 id: "command",
                 title: "Health check command",
-                value: healthCheckCommand
+                type: "textarea",
+                value: preferences.healthCommand,
+                disabled: true
             },
             {
                 id: "safety",
                 title: "Safety model",
-                value: "Inspect-only commands, sent only through Termy terminal.write after a user action."
-            },
-            {
-                id: "runtime",
-                title: "Runtime boundary",
-                value: "No Node APIs, filesystem access, network access, Keychain access, credentials, or scrollback."
+                type: "text",
+                value: "Inspect-only commands, sent only after a user action.",
+                disabled: true
             }
         ],
         actions: [
             { id: actionInsertHealthCheck, title: "Insert check", icon: "terminal.fill" },
-            { id: actionRunHealthCheck, title: "Run check", icon: "play.fill" }
+            { id: actionRunHealthCheck, title: "Run check", icon: "play.fill", style: "prominent" }
         ]
     });
+}
+function inventoryToast(event, inventory) {
+    const prefix = event?.row?.title ? `${event.row.title}: ` : "";
+    return `${prefix}${inventory.hosts.length} hosts, ${inventory.snippets.length} snippets`;
+}
+function stringValue(value, fallback) {
+    return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+}
+function booleanValue(value, fallback) {
+    return typeof value === "boolean" ? value : fallback;
 }
