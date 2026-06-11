@@ -1,0 +1,48 @@
+{
+  "id": "community.termy.host-ops",
+  "name": "Host Ops Cockpit",
+  "version": "0.1.0",
+  "termyApiVersion": "1",
+  "entry": "dist/index.js",
+  "capabilities": [
+    "hosts.read",
+    "snippets.read",
+    "terminal.write"
+  ],
+  "contributes": {
+    "actions": [
+      {
+        "id": "ops.openDashboard",
+        "title": "Host Ops: Open Cockpit",
+        "icon": "rectangle.grid.2x2.fill"
+      },
+      {
+        "id": "ops.showInventory",
+        "title": "Host Ops: Show Inventory",
+        "icon": "list.bullet.rectangle.fill"
+      },
+      {
+        "id": "ops.insertHealthCheck",
+        "title": "Host Ops: Insert Health Check",
+        "icon": "terminal.fill"
+      },
+      {
+        "id": "ops.runHealthCheck",
+        "title": "Host Ops: Run Health Check",
+        "icon": "play.fill"
+      },
+      {
+        "id": "ops.showRunbook",
+        "title": "Host Ops: Show Runbook",
+        "icon": "book.closed.fill"
+      }
+    ],
+    "panes": [
+      {
+        "id": "ops.dashboard",
+        "title": "Host Ops Cockpit",
+        "icon": "server.rack"
+      }
+    ]
+  }
+}

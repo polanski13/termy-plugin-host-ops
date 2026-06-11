@@ -1,0 +1,27 @@
+{
+  "name": "termy-plugin-host-ops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Showcase community plugin for Termy host operations.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/polanski13/termy-plugin-host-ops.git"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "pack:plugin": "npm run typecheck && npm test && node scripts/pack-plugin.mjs"
+  },
+  "devDependencies": {
+    "@apolanski13/termy-sdk": "0.1.0",
+    "ajv": "^8.17.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.14.0",
+    "npm": ">=11.5.1"
+  }
+}
