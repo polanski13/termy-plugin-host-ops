@@ -14,7 +14,9 @@ It does not use Node APIs, filesystem access, network access, Keychain access, S
 
 ## Install
 
-Download `host-ops-cockpit-v0.1.0.termy-plugin.zip` from the GitHub release.
+Download the release asset named `host-ops-cockpit-v0.1.1.termy-plugin.zip`.
+
+Use the `.termy-plugin.zip` release asset, not GitHub's automatic `Source code` zip from older releases. The release asset contains the compiled plugin entry that Termy loads.
 
 In Termy:
 
@@ -64,7 +66,7 @@ npm run pack:plugin
 The installable plugin zip is written to:
 
 ```text
-release/host-ops-cockpit-v0.1.0.termy-plugin.zip
+release/host-ops-cockpit-v0.1.1.termy-plugin.zip
 ```
 
 ## Source shape
@@ -76,6 +78,8 @@ dist/index.js
 README.md
 LICENSE
 ```
+
+`dist/index.js` is committed so the repository folder can be installed directly in Termy. Run `npm run build` after changing `src/index.ts`.
 
 Termy v1 expects the compiled entry to keep this shape:
 
