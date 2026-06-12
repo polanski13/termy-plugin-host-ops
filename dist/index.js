@@ -27,9 +27,10 @@ const dashboardActions = [
 export default definePlugin({
     async activate(ctx) {
         ctx.registerPane(paneDashboard, async (event) => {
+            const workspacePromise = Promise.resolve(ctx.workspace.current()).then(normalizeWorkspace);
             const [inventory, workspace, preferences, refreshCount] = await Promise.all([
                 readInventory(ctx),
-                ctx.workspace.current(),
+                workspacePromise,
                 readPreferences(ctx),
                 incrementRefreshCount(ctx)
             ]);
@@ -72,13 +73,13 @@ export default definePlugin({
         });
         ctx.registerAction(actionShowRunbook, async () => {
             const [workspace, preferences] = await Promise.all([ctx.workspace.current(), readPreferences(ctx)]);
-            return runbookView(ctx, workspace, preferences);
+            return runbookView(ctx, normalizeWorkspace(workspace), preferences);
         });
     }
 });
 async function readInventory(ctx) {
     const [hosts, snippets] = await Promise.all([ctx.hosts.list(), ctx.snippets.list()]);
-    return { hosts, snippets };
+    return { hosts: normalizeHosts(hosts), snippets: normalizeSnippets(snippets) };
 }
 async function readPreferences(ctx) {
     const stored = await ctx.storage.get(storagePreferencesKey);
@@ -318,4 +319,68 @@ function stringValue(value, fallback) {
 }
 function booleanValue(value, fallback) {
     return typeof value === "boolean" ? value : fallback;
+}
+function normalizeWorkspace(value) {
+    const source = isRecord(value) ? value : {};
+    return {
+        focusedPaneKind: nullableString(source.focusedPaneKind),
+        focusedPaneHasTerminal: source.focusedPaneHasTerminal === true,
+        focusedHost: normalizeHost(source.focusedHost, "focused-host")
+    };
+}
+function normalizeHosts(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.flatMap((host, index) => {
+        const normalized = normalizeHost(host, `host-${index + 1}`);
+        return normalized ? [normalized] : [];
+    });
+}
+function normalizeHost(value, fallbackId) {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const hostname = nonEmptyString(value.hostname, "");
+    const name = nonEmptyString(value.name, hostname || "Unnamed host");
+    return {
+        id: nonEmptyString(value.id, fallbackId),
+        name,
+        hostname: hostname || "unknown",
+        username: nonEmptyString(value.username, "unknown"),
+        port: numberValue(value.port, 22),
+        osKind: nonEmptyString(value.osKind, "unknown")
+    };
+}
+function normalizeSnippets(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.flatMap((snippet, index) => {
+        const normalized = normalizeSnippet(snippet, `snippet-${index + 1}`);
+        return normalized ? [normalized] : [];
+    });
+}
+function normalizeSnippet(value, fallbackId) {
+    if (!isRecord(value)) {
+        return null;
+    }
+    return {
+        id: nonEmptyString(value.id, fallbackId),
+        name: nonEmptyString(value.name, "Unnamed snippet"),
+        command: nonEmptyString(value.command, ""),
+        tags: Array.isArray(value.tags) ? value.tags.flatMap((tag) => typeof tag === "string" ? [tag] : []) : []
+    };
+}
+function isRecord(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function nullableString(value) {
+    return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+function nonEmptyString(value, fallback) {
+    return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+}
+function numberValue(value, fallback) {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }

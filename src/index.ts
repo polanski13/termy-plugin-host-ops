@@ -44,9 +44,10 @@ const dashboardActions: PluginSchemaAction[] = [
 export default definePlugin({
   async activate(ctx) {
     ctx.registerPane(paneDashboard, async (event) => {
+      const workspacePromise = Promise.resolve(ctx.workspace.current()).then(normalizeWorkspace);
       const [inventory, workspace, preferences, refreshCount] = await Promise.all([
         readInventory(ctx),
-        ctx.workspace.current(),
+        workspacePromise,
         readPreferences(ctx),
         incrementRefreshCount(ctx)
       ]);
@@ -96,14 +97,14 @@ export default definePlugin({
 
     ctx.registerAction(actionShowRunbook, async () => {
       const [workspace, preferences] = await Promise.all([ctx.workspace.current(), readPreferences(ctx)]);
-      return runbookView(ctx, workspace, preferences);
+      return runbookView(ctx, normalizeWorkspace(workspace), preferences);
     });
   }
 });
 
 async function readInventory(ctx: PluginContext): Promise<Inventory> {
   const [hosts, snippets] = await Promise.all([ctx.hosts.list(), ctx.snippets.list()]);
-  return { hosts, snippets };
+  return { hosts: normalizeHosts(hosts), snippets: normalizeSnippets(snippets) };
 }
 
 async function readPreferences(ctx: PluginContext): Promise<Preferences> {
@@ -374,4 +375,77 @@ function stringValue(value: PluginJSONValue | undefined, fallback: string): stri
 
 function booleanValue(value: PluginJSONValue | undefined, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeWorkspace(value: unknown): WorkspaceContext {
+  const source = isRecord(value) ? value : {};
+  return {
+    focusedPaneKind: nullableString(source.focusedPaneKind),
+    focusedPaneHasTerminal: source.focusedPaneHasTerminal === true,
+    focusedHost: normalizeHost(source.focusedHost, "focused-host")
+  };
+}
+
+function normalizeHosts(value: unknown): HostSummary[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((host, index) => {
+    const normalized = normalizeHost(host, `host-${index + 1}`);
+    return normalized ? [normalized] : [];
+  });
+}
+
+function normalizeHost(value: unknown, fallbackId: string): HostSummary | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const hostname = nonEmptyString(value.hostname, "");
+  const name = nonEmptyString(value.name, hostname || "Unnamed host");
+  return {
+    id: nonEmptyString(value.id, fallbackId),
+    name,
+    hostname: hostname || "unknown",
+    username: nonEmptyString(value.username, "unknown"),
+    port: numberValue(value.port, 22),
+    osKind: nonEmptyString(value.osKind, "unknown")
+  };
+}
+
+function normalizeSnippets(value: unknown): SnippetSummary[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((snippet, index) => {
+    const normalized = normalizeSnippet(snippet, `snippet-${index + 1}`);
+    return normalized ? [normalized] : [];
+  });
+}
+
+function normalizeSnippet(value: unknown, fallbackId: string): SnippetSummary | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return {
+    id: nonEmptyString(value.id, fallbackId),
+    name: nonEmptyString(value.name, "Unnamed snippet"),
+    command: nonEmptyString(value.command, ""),
+    tags: Array.isArray(value.tags) ? value.tags.flatMap((tag) => typeof tag === "string" ? [tag] : []) : []
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function nonEmptyString(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
